@@ -8,7 +8,7 @@ endpoint addresses in the script.
 
 ## Installation
 
-    pip install --user osm_to_sandbox
+    pip install --user osm-to-sandbox
 
 ## Usage
 
