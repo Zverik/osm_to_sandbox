@@ -3,7 +3,7 @@
 This is a script to download data from OSM API and upload it to the
 [mapping sandbox](https://wiki.openstreetmap.org/wiki/Sandbox_for_editing).
 
-Note that it clears all data in the sandbox before hand. NEVER change
+Note that it clears all data in the sandbox beforehand. NEVER change
 endpoint addresses in the script.
 
 ## Installation
