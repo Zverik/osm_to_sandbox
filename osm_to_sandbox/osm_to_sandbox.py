@@ -368,25 +368,24 @@ def main(bbox, auth_header, overpass_api=OVERPASS_API, filter_str=None, date_str
             sys.exit(0)
     if not sandbox_elements:
         print('Sandbox is empty there.')
+    else:
+        print('Clearing the area on the sandbox server.')
+        delete_elements(sandbox_elements, auth_header)
 
     elements = download_from_overpass(bbox,
                                       overpass_api,
                                       filter_str=filter_str,
                                       date_str=date_str)
-    filter_by_bbox(elements, bbox)
-    delete_missing(elements)
-    delete_unreferenced_nodes(elements)
+    # filter_by_bbox(elements, bbox)
+    # delete_missing(elements)
+    # delete_unreferenced_nodes(elements)
 
     if not elements:
-        raise IndexError('No elements in the given bounding box')
-    else:
-        print(f'Downloaded {len(elements)} elements.')
+        print('No elements in the given bounding box')
+        return
+    print(f'Downloaded {len(elements)} elements.')
 
     # write_osc_and_exit(elements, open('test.osc', 'w'))
-
-    if sandbox_elements:
-        print('Clearing the area on the sandbox server.')
-        delete_elements(sandbox_elements, auth_header)
 
     print('Uploading new data.')
     upload_elements(elements, auth_header)
