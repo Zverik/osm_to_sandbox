@@ -15,12 +15,10 @@ endpoint addresses in the script.
 Open the [bounding box tool](https://boundingbox.klokantech.com/),
 draw a box, choose "CSV" format below, and copy the numbers. Then do:
 
-    osm_to_sandbox 1.2,3.4,5.6,7.8
+    osm_to_sandbox 1.2,3.4,5.6,7.8 --auth
 
-Where numbers are your bbox. The script would download the data from both
-servers, and then it would ask you for your login and password to the Sandbox.
-[Get these here](https://master.apis.dev.openstreetmap.org/user/new).
-Then it would start doing its uploading work.
+Where numbers are your bbox. The `--auth` flag is required and will prompt for the Sandbox username and password. [Get these here](https://master.apis.dev.openstreetmap.org/user/new). The script would download the data from both
+servers, then it would start doing its uploading work.
 
 ## Author
 

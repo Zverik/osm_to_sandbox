@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import argparse
 import requests
 import sys
 import getpass
@@ -132,6 +133,31 @@ class HTTPError(Exception):
         return 'HTTPError({}, {})'.format(self.code, self.message)
 
 
+class AuthPromptAction(argparse.Action):
+    def __init__(self,
+                 option_strings,
+                 dest=None,
+                 nargs=0,
+                 default=None,
+                 required=False,
+                 type=None,
+                 metavar=None,
+                 help=None):
+        super(AuthPromptAction, self).__init__(
+            option_strings=option_strings,
+            dest=dest,
+            nargs=nargs,
+            default=default,
+            required=required,
+            metavar=metavar,
+            type=type,
+            help=help)
+
+    def __call__(self, parser, args, values, option_string=None):
+        auth_header = read_auth()
+        setattr(args, self.dest, auth_header)
+
+
 def api_request(server, endpoint, method='GET', params=None,
                 raw_result=False, auth=None, **kwargs):
     headers = {}
@@ -148,7 +174,7 @@ def api_request(server, endpoint, method='GET', params=None,
 
 
 def read_auth():
-    """Read login and password from keyboard, and prepare an basic auth header."""
+    """Read login and password from keyboard, and prepare a basic auth header."""
     ok = False
     while not ok:
         login = input('Login: ')
@@ -204,13 +230,18 @@ def download_from_api(bbox, endpoint):
             raise Exception('You have been blocked from API for downloading too much: ' + e.message)
 
 
-def download_from_overpass(bbox):
-    bbox_str = ','.join(str(bbox[i]) for i in (1, 0, 3, 2))
-    query = f'[timeout:300];(node({bbox_str});<;);out meta qt;'
-    resp = requests.get(f'{OVERPASS_API}/interpreter', {'data': query})
+def download_from_overpass(bbox, overpass_api, filter_str=None, date_str=None):
+    bbox_para = ','.join(str(bbox[i]) for i in (1, 0, 3, 2))
+    date_para = f'[date:"{date_str}"]' if date_str else ""
+    filter_para = f'[{filter_str}]' if filter_str else ""
+    query = (f'[timeout:300]{date_para}[bbox:{bbox_para}];'
+             f'(nwr{filter_para};>;);'
+             # 'nwr._;' # This will produce results equivalent to the former version of the tool but may destroy larger objects.
+             'out meta qt;')
+    resp = requests.get(f'{overpass_api}/interpreter', {'data': query})
     if resp.status_code != 200:
         if 'rate_limited' in resp.text:
-            resp = requests.get(f'{OVERPASS_API}/status')
+            resp = requests.get(f'{overpass_api}/status')
             print(resp.text)
             raise Exception('You are rate limited')
         raise Exception('Could not download data from Overpass API: ' + resp.text)
@@ -318,15 +349,7 @@ def write_osc_and_exit(elements, fileobj):
     sys.exit(0)
 
 
-def main():
-    if len(sys.argv) < 2:
-        print('Downloads data from OSM API and uploads it to the mapping sandbox.')
-        print('Usage: {} <minlon,minlat,maxlon,maxlat>'.format(sys.argv[0]))
-        print()
-        print('Get the bounding box from https://boundingbox.klokantech.com/ (format "CSV")')
-        sys.exit(1)
-
-    bbox = [float(x.strip()) for x in sys.argv[1].split(',')]
+def main(bbox, auth_header, overpass_api=OVERPASS_API, filter_str=None, date_str=None):
     if len(bbox) != 4:
         raise ValueError('Please specify four numbers for the bbox')
     if bbox[0] > bbox[2]:
@@ -346,7 +369,10 @@ def main():
     if not sandbox_elements:
         print('Sandbox is empty there.')
 
-    elements = download_from_overpass(bbox)
+    elements = download_from_overpass(bbox,
+                                      overpass_api,
+                                      filter_str=filter_str,
+                                      date_str=date_str)
     filter_by_bbox(elements, bbox)
     delete_missing(elements)
     delete_unreferenced_nodes(elements)
@@ -358,9 +384,6 @@ def main():
 
     # write_osc_and_exit(elements, open('test.osc', 'w'))
 
-    print('Now please enter your OSM Sandbox credentials.')
-    auth_header = read_auth()
-
     if sandbox_elements:
         print('Clearing the area on the sandbox server.')
         delete_elements(sandbox_elements, auth_header)
@@ -371,5 +394,41 @@ def main():
     print('Done.')
 
 
+def cli():
+    parser = argparse.ArgumentParser(
+        description="Downloads data from Overpass API and uploads it to the mapping "
+                    "sandbox.",
+        epilog="Because sandboxes are for grown-ups, too!",
+    )
+    parser = add_args(parser)
+    args = parser.parse_args()
+    bbox = [float(x.strip()) for x in args.bbox.split(',')]
+    main(bbox, args.auth_header, args.overpass_api)
+
+
+def add_args(parser):
+    parser.add_argument(
+        "bbox",
+        help="The target bounding box in format minlon,minlat,maxlon,maxlat. "
+             "Get the bounding box from https://boundingbox.klokantech.com/.",
+    )
+    parser.add_argument("--auth", "-a",
+                        required=True,
+                        help="This flag will spawn a password prompt before entering "
+                             "the program. Authentication is necessary to upload data "
+                             "to the sandbox.",
+                        dest='auth_header',
+                        action=AuthPromptAction,
+                        type=str)
+    parser.add_argument("--overpass",
+                        required=False,
+                        help="Use a custom overpass API instance "
+                             f"(default: {OVERPASS_API}).",
+                        dest='overpass_api',
+                        default=OVERPASS_API,
+                        type=str)
+    return parser
+
+
 if __name__ == '__main__':
-    main()
+    cli()
