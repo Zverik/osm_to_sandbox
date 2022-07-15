@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import argparse
-
 import requests
 import sys
 import getpass
@@ -403,8 +402,8 @@ def cli():
     )
     parser = add_args(parser)
     args = parser.parse_args()
-    args.bbox = [float(x.strip()) for x in args.bbox.split(',')]
-    main(args.bbox, args.auth_header, args.overpass_api)
+    bbox = [float(x.strip()) for x in args.bbox.split(',')]
+    main(bbox, args.auth_header, args.overpass_api)
 
 
 def add_args(parser):
@@ -413,7 +412,7 @@ def add_args(parser):
         help="The target bounding box in format minlon,minlat,maxlon,maxlat. "
              "Get the bounding box from https://boundingbox.klokantech.com/.",
     )
-    parser.add_argument("-auth",
+    parser.add_argument("--auth", "-a",
                         required=True,
                         help="This flag will spawn a password prompt before entering "
                              "the program. Authentication is necessary to upload data "
@@ -421,7 +420,7 @@ def add_args(parser):
                         dest='auth_header',
                         action=AuthPromptAction,
                         type=str)
-    parser.add_argument("--overpassURL",
+    parser.add_argument("--overpass",
                         required=False,
                         help="Use a custom overpass API instance "
                              f"(default: {OVERPASS_API}).",
