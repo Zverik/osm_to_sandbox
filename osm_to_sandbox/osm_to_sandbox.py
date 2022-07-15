@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import argparse
+
 import requests
 import sys
 import getpass
@@ -132,6 +134,31 @@ class HTTPError(Exception):
         return 'HTTPError({}, {})'.format(self.code, self.message)
 
 
+class AuthPromptAction(argparse.Action):
+    def __init__(self,
+                 option_strings,
+                 dest=None,
+                 nargs=0,
+                 default=None,
+                 required=False,
+                 type=None,
+                 metavar=None,
+                 help=None):
+        super(AuthPromptAction, self).__init__(
+            option_strings=option_strings,
+            dest=dest,
+            nargs=nargs,
+            default=default,
+            required=required,
+            metavar=metavar,
+            type=type,
+            help=help)
+
+    def __call__(self, parser, args, values, option_string=None):
+        auth_header = read_auth()
+        setattr(args, self.dest, auth_header)
+
+
 def api_request(server, endpoint, method='GET', params=None,
                 raw_result=False, auth=None, **kwargs):
     headers = {}
@@ -148,7 +175,7 @@ def api_request(server, endpoint, method='GET', params=None,
 
 
 def read_auth():
-    """Read login and password from keyboard, and prepare an basic auth header."""
+    """Read login and password from keyboard, and prepare a basic auth header."""
     ok = False
     while not ok:
         login = input('Login: ')
@@ -318,15 +345,7 @@ def write_osc_and_exit(elements, fileobj):
     sys.exit(0)
 
 
-def main():
-    if len(sys.argv) < 2:
-        print('Downloads data from OSM API and uploads it to the mapping sandbox.')
-        print('Usage: {} <minlon,minlat,maxlon,maxlat>'.format(sys.argv[0]))
-        print()
-        print('Get the bounding box from https://boundingbox.klokantech.com/ (format "CSV")')
-        sys.exit(1)
-
-    bbox = [float(x.strip()) for x in sys.argv[1].split(',')]
+def main(bbox, auth_header):
     if len(bbox) != 4:
         raise ValueError('Please specify four numbers for the bbox')
     if bbox[0] > bbox[2]:
@@ -358,9 +377,6 @@ def main():
 
     # write_osc_and_exit(elements, open('test.osc', 'w'))
 
-    print('Now please enter your OSM Sandbox credentials.')
-    auth_header = read_auth()
-
     if sandbox_elements:
         print('Clearing the area on the sandbox server.')
         delete_elements(sandbox_elements, auth_header)
@@ -371,5 +387,34 @@ def main():
     print('Done.')
 
 
+def cli():
+    parser = argparse.ArgumentParser(
+        description="Downloads data from Overpass API and uploads it to the mapping "
+                    "sandbox.",
+        epilog="Because sandboxes are for grown-ups, too!",
+    )
+    parser = add_args(parser)
+    args = parser.parse_args()
+    args.bbox = [float(x.strip()) for x in args.bbox.split(',')]
+    main(args.bbox, args.auth_header)
+
+
+def add_args(parser):
+    parser.add_argument(
+        "bbox",
+        help="The target bounding box in format minlon,minlat,maxlon,maxlat. "
+             "Get the bounding box from https://boundingbox.klokantech.com/.",
+    )
+    parser.add_argument("-auth",
+                        required=True,
+                        help="This flag will spawn a password prompt before entering "
+                             "the program. Authentication is necessary to upload data "
+                             "to the sandbox.",
+                        dest='auth_header',
+                        action=AuthPromptAction,
+                        type=str)
+    return parser
+
+
 if __name__ == '__main__':
-    main()
+    cli()
