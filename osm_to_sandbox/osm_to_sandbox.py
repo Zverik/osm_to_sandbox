@@ -231,13 +231,13 @@ def download_from_api(bbox, endpoint):
             raise Exception('You have been blocked from API for downloading too much: ' + e.message)
 
 
-def download_from_overpass(bbox):
+def download_from_overpass(bbox, overpass_api):
     bbox_str = ','.join(str(bbox[i]) for i in (1, 0, 3, 2))
     query = f'[timeout:300];(node({bbox_str});<;);out meta qt;'
-    resp = requests.get(f'{OVERPASS_API}/interpreter', {'data': query})
+    resp = requests.get(f'{overpass_api}/interpreter', {'data': query})
     if resp.status_code != 200:
         if 'rate_limited' in resp.text:
-            resp = requests.get(f'{OVERPASS_API}/status')
+            resp = requests.get(f'{overpass_api}/status')
             print(resp.text)
             raise Exception('You are rate limited')
         raise Exception('Could not download data from Overpass API: ' + resp.text)
@@ -345,7 +345,7 @@ def write_osc_and_exit(elements, fileobj):
     sys.exit(0)
 
 
-def main(bbox, auth_header):
+def main(bbox, auth_header, overpass_api=OVERPASS_API):
     if len(bbox) != 4:
         raise ValueError('Please specify four numbers for the bbox')
     if bbox[0] > bbox[2]:
@@ -365,7 +365,7 @@ def main(bbox, auth_header):
     if not sandbox_elements:
         print('Sandbox is empty there.')
 
-    elements = download_from_overpass(bbox)
+    elements = download_from_overpass(bbox, overpass_api)
     filter_by_bbox(elements, bbox)
     delete_missing(elements)
     delete_unreferenced_nodes(elements)
@@ -396,7 +396,7 @@ def cli():
     parser = add_args(parser)
     args = parser.parse_args()
     args.bbox = [float(x.strip()) for x in args.bbox.split(',')]
-    main(args.bbox, args.auth_header)
+    main(args.bbox, args.auth_header, args.overpass_api)
 
 
 def add_args(parser):
@@ -412,6 +412,13 @@ def add_args(parser):
                              "to the sandbox.",
                         dest='auth_header',
                         action=AuthPromptAction,
+                        type=str)
+    parser.add_argument("--overpassURL",
+                        required=False,
+                        help="Use a custom overpass API instance "
+                             f"(default: {OVERPASS_API}).",
+                        dest='overpass_api',
+                        default=OVERPASS_API,
                         type=str)
     return parser
 
