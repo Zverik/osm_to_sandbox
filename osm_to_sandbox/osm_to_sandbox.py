@@ -231,9 +231,14 @@ def download_from_api(bbox, endpoint):
             raise Exception('You have been blocked from API for downloading too much: ' + e.message)
 
 
-def download_from_overpass(bbox, overpass_api):
-    bbox_str = ','.join(str(bbox[i]) for i in (1, 0, 3, 2))
-    query = f'[timeout:300];(node({bbox_str});<;);out meta qt;'
+def download_from_overpass(bbox, overpass_api, filter_str=None, date_str=None):
+    bbox_para = ','.join(str(bbox[i]) for i in (1, 0, 3, 2))
+    date_para = f'[date:"{date_str}"]' if date_str else ""
+    filter_para = f'[{filter_str}]' if filter_str else ""
+    query = (f'[timeout:300]{date_para}[bbox:{bbox_para}];'
+             f'(nwr{filter_para};>;);'
+             # 'nwr._;' # This will produce results equivalent to the former version of the tool but may destroy larger objects.
+             'out meta qt;')
     resp = requests.get(f'{overpass_api}/interpreter', {'data': query})
     if resp.status_code != 200:
         if 'rate_limited' in resp.text:
@@ -345,7 +350,7 @@ def write_osc_and_exit(elements, fileobj):
     sys.exit(0)
 
 
-def main(bbox, auth_header, overpass_api=OVERPASS_API):
+def main(bbox, auth_header, overpass_api=OVERPASS_API, filter_str=None, date_str=None):
     if len(bbox) != 4:
         raise ValueError('Please specify four numbers for the bbox')
     if bbox[0] > bbox[2]:
@@ -365,7 +370,10 @@ def main(bbox, auth_header, overpass_api=OVERPASS_API):
     if not sandbox_elements:
         print('Sandbox is empty there.')
 
-    elements = download_from_overpass(bbox, overpass_api)
+    elements = download_from_overpass(bbox,
+                                      overpass_api,
+                                      filter_str=filter_str,
+                                      date_str=date_str)
     filter_by_bbox(elements, bbox)
     delete_missing(elements)
     delete_unreferenced_nodes(elements)
