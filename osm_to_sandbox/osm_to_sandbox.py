@@ -235,7 +235,8 @@ def download_from_overpass(bbox, overpass_api, filter_str=None, date_str=None):
     date_para = f'[date:"{date_str}"]' if date_str else ""
     filter_para = f'[{filter_str}]' if filter_str else ""
     query = (f'[timeout:300]{date_para}[bbox:{bbox_para}];'
-             f'(nwr{filter_para};>;);'
+             f'(nwr{filter_para};);'
+             '(_.;>;);'
              # 'nwr._;' # This will produce results equivalent to the former version of the tool but may destroy larger objects.
              'out meta qt;')
     resp = requests.get(f'{overpass_api}/interpreter', {'data': query})
