@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 import argparse
+import logging
 import requests
 import sys
-import getpass
-import base64
 from lxml import etree
+from oauthcli import OpenStreetMapDevAuth
 
 
 OSM_API = 'https://api.openstreetmap.org/api/0.6/'
@@ -95,8 +95,7 @@ class Uploader:
                 self.server, 'changeset/create', method='PUT', raw_result=True,
                 auth=self.auth, data=etree.tostring(root))
         except HTTPError as e:
-            raise IOError('Failed to create a changeset: {} {}'.format(
-                e.code, e.message))
+            raise IOError(f'Failed to create a changeset: {e}')
         self.changeset = resp.strip()
         return self
 
@@ -106,8 +105,7 @@ class Uploader:
                 self.server, f'changeset/{self.changeset}/upload', method='POST',
                 auth=self.auth, data=etree.tostring(root))
         except HTTPError as e:
-            raise IOError('Failed to erase data from the sandbox: {} {}'.format(
-                e.code, e.message))
+            raise IOError(f'Failed to erase data from the sandbox: {e}')
 
         # Return id mapping
         id_map = {}
@@ -121,16 +119,17 @@ class Uploader:
                 self.server, f'changeset/{self.changeset}/close', method='PUT',
                 auth=self.auth, raw_result=True)
         except HTTPError as e:
-            print('Failed to close a changeset: {} {}'.format(e.code, e.message))
+            logging.warning(f'Failed to close a changeset: {e}')
 
 
 class HTTPError(Exception):
-    def __init__(self, code, message):
+    def __init__(self, code, url, message):
         self.code = code
+        self.url = url
         self.message = message
 
     def __str__(self):
-        return 'HTTPError({}, {})'.format(self.code, self.message)
+        return 'HTTPError({}, {}, {})'.format(self.code, self.url, self.message)
 
 
 class AuthPromptAction(argparse.Action):
@@ -153,9 +152,21 @@ class AuthPromptAction(argparse.Action):
             type=type,
             help=help)
 
+    CLIENT_ID = '3VjT-7YEO3-YjoSgt6M2Rll0WiujzSQ7T2GwzC71UZ0'
+    CLIENT_SECRET = 'v6Mtgw2fqAAkaaLbmzpkcJUd4dH0Ysk3ZMMsF5gckuM'
+
     def __call__(self, parser, args, values, option_string=None):
-        auth_header = read_auth()
-        setattr(args, self.dest, auth_header)
+        auth_object = OpenStreetMapDevAuth(
+            AuthPromptAction.CLIENT_ID, AuthPromptAction.CLIENT_SECRET,
+            scopes=['read_prefs', 'write_api'],
+        ).auth_server()
+        test = auth_object.get('user/details')
+        if test.status_code == 401:
+            auth_object = OpenStreetMapDevAuth(
+                AuthPromptAction.CLIENT_ID, AuthPromptAction.CLIENT_SECRET,
+                scopes=['read_prefs', 'write_api'],
+            ).auth_server(force=True)
+        setattr(args, self.dest, auth_object)
 
 
 def api_request(server, endpoint, method='GET', params=None,
@@ -163,42 +174,23 @@ def api_request(server, endpoint, method='GET', params=None,
     headers = {}
     headers['Content-Type'] = 'application/xml'
     if auth:
-        headers['Authorization'] = auth
-    resp = requests.request(method, server + endpoint, params=params, headers=headers, **kwargs)
+        resp = auth.request(method, endpoint, params=params, headers=headers, **kwargs)
+    else:
+        resp = requests.request(method, server + endpoint, params=params, headers=headers, **kwargs)
     resp.encoding = 'utf-8'
     if resp.status_code != 200:
-        raise HTTPError(resp.status_code, resp.text)
+        raise HTTPError(resp.status_code, resp.url, resp.text)
     if resp.content and not raw_result:
         return etree.fromstring(resp.content)
     return resp.text
 
 
-def read_auth():
-    """Read login and password from keyboard, and prepare a basic auth header."""
-    ok = False
-    while not ok:
-        login = input('Login: ')
-        if not login:
-            print('Okay')
-            sys.exit(0)
-        auth_header = 'Basic {0}'.format(base64.b64encode('{0}:{1}'.format(
-            login, getpass.getpass('Password: ')).encode('utf-8')).decode('utf-8'))
-        try:
-            result = api_request(SANDBOX_API, 'user/details', auth=auth_header)
-            ok = len(result) > 0
-        except HTTPError:
-            pass
-        if not ok:
-            print('You must have mistyped. Please try again.')
-    return auth_header
-
-
-def get_changeset_size(endpoint):
-    data = api_request(endpoint, 'capabilities')
+def get_changeset_size(auth_object):
+    data = api_request(SANDBOX_API, 'capabilities', auth=auth_object)
     try:
         return int(data.find('api').find('changesets').get('maximum_elements'))
     except AttributeError:
-        print('Failed to get maximum changeset size.')
+        logging.warning('Failed to get maximum changeset size.')
         return 10000
 
 
@@ -227,7 +219,7 @@ def download_from_api(bbox, endpoint):
                 data.update(more_data)
             return data
         elif e.code == 509:
-            raise Exception('You have been blocked from API for downloading too much: ' + e.message)
+            raise Exception(f'You have been blocked from API for downloading too much: {e}')
 
 
 def download_from_overpass(bbox, overpass_api, filter_str=None, date_str=None):
@@ -236,13 +228,15 @@ def download_from_overpass(bbox, overpass_api, filter_str=None, date_str=None):
     filter_para = f'[{filter_str}]' if filter_str else ""
     query = (f'[timeout:300]{date_para}[bbox:{bbox_para}];'
              f'(nwr{filter_para};>;);'
-             # 'nwr._;' # This will produce results equivalent to the former version of the tool but may destroy larger objects.
+             # 'nwr._;'
+             # The above line will produce results equivalent to the former version of the tool
+             # but may destroy larger objects.
              'out meta qt;')
     resp = requests.get(f'{overpass_api}/interpreter', {'data': query})
     if resp.status_code != 200:
         if 'rate_limited' in resp.text:
             resp = requests.get(f'{overpass_api}/status')
-            print(resp.text)
+            logging.error(resp.text)
             raise Exception('You are rate limited')
         raise Exception('Could not download data from Overpass API: ' + resp.text)
     tree = etree.fromstring(resp.content)
@@ -286,8 +280,8 @@ def delete_unreferenced_nodes(elements):
             del elements[sid]
 
 
-def upload_delete(elements, auth_header):
-    with Uploader(SANDBOX_API, auth_header, 'Clearing an area before uploading') as u:
+def upload_delete(elements, auth_object):
+    with Uploader(SANDBOX_API, auth_object, 'Clearing an area before uploading') as u:
         root = etree.Element('osmChange', version='0.6', generator=CREATED_BY)
         delete = etree.SubElement(root, 'delete')
         delete.set('if-unused', 'true')
@@ -296,16 +290,16 @@ def upload_delete(elements, auth_header):
         u.upload(root)
 
 
-def delete_elements(elements, auth_header):
-    max_el = get_changeset_size(SANDBOX_API)
+def delete_elements(elements, auth_object):
+    max_el = get_changeset_size(auth_object)
     values = list(elements.values())
     values.sort(key=lambda el: el.sort_key, reverse=True)
     for i in range(0, len(values), max_el):
-        upload_delete(values[i:i + max_el], auth_header)
+        upload_delete(values[i:i + max_el], auth_object)
 
 
-def upload_create(elements, auth_header):
-    with Uploader(SANDBOX_API, auth_header, 'Copying data from OSM') as u:
+def upload_create(elements, auth_object):
+    with Uploader(SANDBOX_API, auth_object, 'Copying data from OSM') as u:
         root = etree.Element('osmChange', version='0.6', generator=CREATED_BY)
         create = etree.SubElement(root, 'create')
         for el in elements:
@@ -330,13 +324,13 @@ def renumber_for_creating(values):
     renumber(values, id_map)
 
 
-def upload_elements(elements, auth_header):
-    max_el = get_changeset_size(OSM_API)
+def upload_elements(elements, auth_object):
+    max_el = get_changeset_size(auth_object)
     values = list(elements.values())
     values.sort(key=lambda el: el.sort_key)
     renumber_for_creating(values)
     for i in range(0, len(values), max_el):
-        id_map = upload_create(values[i:i + max_el], auth_header)
+        id_map = upload_create(values[i:i + max_el], auth_object)
         renumber(values, id_map)
 
 
@@ -349,7 +343,8 @@ def write_osc_and_exit(elements, fileobj):
     sys.exit(0)
 
 
-def main(bbox, auth_header, overpass_api=OVERPASS_API, filter_str=None, date_str=None):
+def main(bbox, auth_object, overpass_api=OVERPASS_API, filter_str=None, date_str=None):
+    logging.basicConfig(level=logging.INFO, format='%(message)s')
     if len(bbox) != 4:
         raise ValueError('Please specify four numbers for the bbox')
     if bbox[0] > bbox[2]:
@@ -361,14 +356,15 @@ def main(bbox, auth_header, overpass_api=OVERPASS_API, filter_str=None, date_str
 
     sandbox_elements = download_from_api(bbox, SANDBOX_API)
     if len(sandbox_elements) > 10000:
-        print(f'Sandbox has {len(sandbox_elements)} elements at this location.')
-        print('Proceed with deleting them? (type "yes" if agreed)')
+        logging.info(f'Sandbox has {len(sandbox_elements)} elements at this location.')
+        logging.info('Proceed with deleting them? (type "yes" if agreed)')
         answer = input()
-        if answer.lower() != 'yes':
+        if answer.strip().lower() != 'yes':
             sys.exit(0)
     if not sandbox_elements:
-        print('Sandbox is empty there.')
+        logging.info('Sandbox is empty there.')
 
+    logging.info('Downloading data from Overpass API')
     elements = download_from_overpass(bbox,
                                       overpass_api,
                                       filter_str=filter_str,
@@ -380,18 +376,18 @@ def main(bbox, auth_header, overpass_api=OVERPASS_API, filter_str=None, date_str
     if not elements:
         raise IndexError('No elements in the given bounding box')
     else:
-        print(f'Downloaded {len(elements)} elements.')
+        logging.info(f'Downloaded {len(elements)} elements.')
 
     # write_osc_and_exit(elements, open('test.osc', 'w'))
 
     if sandbox_elements:
-        print('Clearing the area on the sandbox server.')
-        delete_elements(sandbox_elements, auth_header)
+        logging.info('Clearing the area on the sandbox server.')
+        delete_elements(sandbox_elements, auth_object)
 
-    print('Uploading new data.')
-    upload_elements(elements, auth_header)
+    logging.info('Uploading new data.')
+    upload_elements(elements, auth_object)
 
-    print('Done.')
+    logging.info('Done.')
 
 
 def cli():
@@ -403,7 +399,7 @@ def cli():
     parser = add_args(parser)
     args = parser.parse_args()
     bbox = [float(x.strip()) for x in args.bbox.split(',')]
-    main(bbox, args.auth_header, args.overpass_api)
+    main(bbox, args.auth_object, args.overpass_api)
 
 
 def add_args(parser):
@@ -417,7 +413,7 @@ def add_args(parser):
                         help="This flag will spawn a password prompt before entering "
                              "the program. Authentication is necessary to upload data "
                              "to the sandbox.",
-                        dest='auth_header',
+                        dest='auth_object',
                         action=AuthPromptAction,
                         type=str)
     parser.add_argument("--overpass",
