@@ -399,7 +399,7 @@ def cli():
     parser = add_args(parser)
     args = parser.parse_args()
     bbox = [float(x.strip()) for x in args.bbox.split(',')]
-    main(bbox, args.auth_object, args.overpass_api)
+    main(bbox, args.auth_object, args.overpass_api, args.filter, args.date)
 
 
 def add_args(parser):
@@ -422,6 +422,20 @@ def add_args(parser):
                              f"(default: {OVERPASS_API}).",
                         dest='overpass_api',
                         default=OVERPASS_API,
+                        type=str)
+    parser.add_argument("--filter",
+                        required=False,
+                        help="Optional tag filter to restrict which objects are copied to the sandbox"
+                             f"(default: none).",
+                        dest='filter',
+                        default=None,
+                        type=str)
+    parser.add_argument("--date",
+                        required=False,
+                        help="Optional timestamp filter to select the data vintage to be copied to the sandbox"
+                             f"(default: none).",
+                        dest='date',
+                        default=None,
                         type=str)
     return parser
 
