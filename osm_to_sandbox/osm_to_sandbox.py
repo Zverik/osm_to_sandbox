@@ -425,15 +425,15 @@ def add_args(parser):
                         type=str)
     parser.add_argument("--filter",
                         required=False,
-                        help="Optional tag filter to restrict which objects are copied to the sandbox"
-                             f"(default: none).",
+                        help="Optional tag filter to restrict which objects are copied to the sandbox "
+                             "(example: --filter='highway=residential'; default: none).",
                         dest='filter',
                         default=None,
                         type=str)
     parser.add_argument("--date",
                         required=False,
-                        help="Optional timestamp filter to select the data vintage to be copied to the sandbox"
-                             f"(default: none).",
+                        help="Optional timestamp filter to select the data vintage to be copied to the sandbox "
+                             "(example: --date='2019-09-21T07:30:00Z'; default: none).",
                         dest='date',
                         default=None,
                         type=str)
